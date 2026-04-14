@@ -161,8 +161,22 @@ class DatabaseHandler:
             logger.info(f"Updated {category} budget to {new_budget}")
         return success
     
+    def get_transactions(self, limit: int = 50, category: Optional[str] = None) -> pd.DataFrame:
+        """Get recent transactions"""
+        conn = sqlite3.connect(self.db_path)
+        
+        if category:
+            query = "SELECT * FROM transactions WHERE category = ? ORDER BY date DESC LIMIT ?"
+            df = pd.read_sql_query(query, conn, params=(category, limit))
+        else:
+            query = "SELECT * FROM transactions ORDER BY date DESC LIMIT ?"
+            df = pd.read_sql_query(query, conn, params=(limit,))
+        
+        conn.close()
+        return df
+    
     def get_categories(self) -> List[Dict]:
-        """Get all categories"""
+        """Get all categories with budgets"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT name, monthly_budget FROM categories ORDER BY name")
