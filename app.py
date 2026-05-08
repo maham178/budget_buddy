@@ -192,7 +192,7 @@ def main():
     ci, cb = st.columns([5,1])
     with ci:
         user_input = st.text_input(
-            label="",
+            label="Transaction",
             placeholder="What did you spend or earn? (English or Roman Urdu)",
             key="txn_input",
             label_visibility="collapsed",
@@ -304,13 +304,13 @@ def main():
 
         st.dataframe(
             tbl.style
-               .applymap(_color, subset=["Type"])
+               .map(_color, subset=["Type"])
                .set_properties(**{"background-color":"#141728","color":"#c7caed","border-color":"#252945"})
                .set_table_styles([{"selector":"th","props":[
                    ("background-color","#1c1f35"),("color","#676b96"),
                    ("font-size","0.77rem"),("text-transform","uppercase"),
                ]}]),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     else:

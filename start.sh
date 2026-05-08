@@ -8,29 +8,65 @@ echo "════════════════════════�
 # ── 1. Install Python dependencies ───────────────────────────────────────────
 echo "📦 Installing Python dependencies…"
 
-# Install everything from requirements.txt first
-pip install -r requirements.txt \
+# Step 1: Force-remove vLLM and all conflicting packages that the base image
+# has pre-installed at wrong versions. We nuke them before reinstalling.
+echo "   🧹 Purging stale packages…"
+pip uninstall -y vllm transformers tokenizers accelerate 2>/dev/null || true
+rm -rf /usr/local/lib/python3.11/dist-packages/vllm* 2>/dev/null || true
+rm -rf /usr/local/lib/python3.11/dist-packages/transformers* 2>/dev/null || true
+rm -rf /usr/local/lib/python3.11/dist-packages/tokenizers* 2>/dev/null || true
+rm -rf /usr/local/lib/python3.11/dist-packages/accelerate* 2>/dev/null || true
+echo "   ✓ Stale packages cleared"
+
+# Step 2: Install exact pinned versions first (order matters — tokenizers
+# must be installed BEFORE transformers so transformers sees the right version)
+echo "   📌 Installing pinned versions…"
+pip install \
+    "tokenizers==0.21.1" \
+    "transformers==4.51.3" \
+    "accelerate==1.7.0" \
     --break-system-packages \
-    --ignore-installed blinker \
+    --no-cache-dir \
+    --force-reinstall \
     --quiet
 
-# Pin tokenizers AFTER vLLM install — vLLM may pull a newer one as a side-effect
-# tokenizers==0.22.2 is required for vLLM 0.8.5 + transformers 4.46.x compatibility
-pip install "tokenizers==0.22.2" \
+# Step 3: Install everything else (vllm last — it pins its own deps)
+echo "   📦 Installing remaining packages…"
+pip install \
+    "streamlit>=1.35.0" \
+    "plotly>=5.20.0" \
+    "pandas>=2.1.0" \
+    "requests>=2.31.0" \
+    "mcp>=1.0.0" \
     --break-system-packages \
-    --force-reinstall \
+    --no-cache-dir \
+    --quiet
+
+pip install \
+    "vllm==0.8.5" \
+    --break-system-packages \
+    --no-cache-dir \
     --quiet
 
 echo "✅ Dependencies installed"
 
-# ── 2. Start vLLM ────────────────────────────────────────────────────────────
+# ── 2. Verify imports ────────────────────────────────────────────────────────
+echo "🔍 Verifying installs…"
+python - << 'PYCHECK'
+import tokenizers, transformers, vllm
+print(f"   tokenizers  : {tokenizers.__version__}")
+print(f"   transformers: {transformers.__version__}")
+print(f"   vllm        : {vllm.__version__}")
+PYCHECK
+
+# ── 3. Start vLLM ────────────────────────────────────────────────────────────
 echo ""
 echo "🚀 Starting vLLM with Phi-3 Mini…"
 echo "   Model : microsoft/Phi-3-mini-4k-instruct"
 echo "   Port  : 8000"
 echo ""
 
-python -m vllm.entrypoints.openai.api_server \
+HF_HUB_DISABLE_XET=1 python -m vllm.entrypoints.openai.api_server \
     --model microsoft/Phi-3-mini-4k-instruct \
     --host 0.0.0.0 \
     --port 8000 \
@@ -38,23 +74,22 @@ python -m vllm.entrypoints.openai.api_server \
     --dtype auto \
     --max-model-len 4096 \
     --gpu-memory-utilization 0.85 \
+    --load-format safetensors \
     &
 
 VLLM_PID=$!
 echo "  ✓ vLLM process started (PID $VLLM_PID)"
 
-# ── 3. Wait for vLLM to be ready ─────────────────────────────────────────────
+# ── 4. Wait for vLLM to be ready ─────────────────────────────────────────────
 echo "⏳ Waiting for vLLM to be ready…"
 ELAPSED=0
-MAX_WAIT=300   # 5 minutes
+MAX_WAIT=300
 
 while [ $ELAPSED -lt $MAX_WAIT ]; do
-    # Check if the process died early — fail fast instead of waiting 5 min
     if ! kill -0 "$VLLM_PID" 2>/dev/null; then
         echo ""
         echo "❌ vLLM process exited unexpectedly (PID $VLLM_PID)."
         echo "   Check the logs above for the error."
-        echo "   Common cause: tokenizers/transformers version mismatch."
         echo ""
         echo "🌐 Starting Streamlit in fallback mode on port 8501…"
         exec streamlit run app.py \
@@ -63,7 +98,6 @@ while [ $ELAPSED -lt $MAX_WAIT ]; do
             --server.headless true
     fi
 
-    # Try the health endpoint
     if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
         echo ""
         echo "✅ vLLM is ready!"
@@ -80,7 +114,7 @@ if [ $ELAPSED -ge $MAX_WAIT ]; then
     echo "⚠️  vLLM did not respond in ${MAX_WAIT}s — starting Streamlit in fallback mode"
 fi
 
-# ── 4. Start Streamlit ───────────────────────────────────────────────────────
+# ── 5. Start Streamlit ───────────────────────────────────────────────────────
 echo ""
 echo "🌐 Starting Streamlit on port 8501…"
 echo "   URL: https://<pod-id>-8501.proxy.runpod.net"
